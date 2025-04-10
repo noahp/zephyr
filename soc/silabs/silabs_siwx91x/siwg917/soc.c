@@ -9,10 +9,18 @@
 #include <zephyr/device.h>
 #include <zephyr/sw_isr_table.h>
 
+#include <soc.h>
+
 #include "em_device.h"
+
+uint32_t siwx917_reset_status;
 
 void soc_early_init_hook(void)
 {
+	printk("MCU_AON->MCUAON_KHZ_CLK_SEL_POR_RESET_STATUS: 0x%08x\n",
+		MCU_AON->MCUAON_KHZ_CLK_SEL_POR_RESET_STATUS);
+	siwx917_reset_status = MCU_AON->MCUAON_KHZ_CLK_SEL_POR_RESET_STATUS;
+
 	SystemInit();
 }
 
