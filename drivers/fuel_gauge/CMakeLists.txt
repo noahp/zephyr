@@ -13,6 +13,7 @@ add_subdirectory_ifdef(CONFIG_LC709203F		lc709203f)
 add_subdirectory_ifdef(CONFIG_SY24561  sy24561)
 
 zephyr_library_sources_ifdef(CONFIG_USERSPACE fuel_gauge_syscall_handlers.c)
+zephyr_library_sources_ifdef(CONFIG_FUEL_GAUGE_SHELL fuel_gauge_shell.c)
 
 if (CONFIG_EMUL AND CONFIG_USERSPACE)
   zephyr_syscall_header(${ZEPHYR_BASE}/include/zephyr/drivers/emul_fuel_gauge.h)

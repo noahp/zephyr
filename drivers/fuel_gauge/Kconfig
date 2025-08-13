@@ -19,6 +19,12 @@ config FUEL_GAUGE_INIT_PRIORITY
 	help
 	  Battery fuel gauge initialization priority.
 
+config FUEL_GAUGE_SHELL
+	bool "Enable fuel gauge shell commands"
+	depends on SHELL
+	help
+	  Enable shell commands for interacting with the fuel gauge driver.
+
 source "drivers/fuel_gauge/max17048/Kconfig"
 source "drivers/fuel_gauge/sbs_gauge/Kconfig"
 source "drivers/fuel_gauge/bq27z746/Kconfig"
