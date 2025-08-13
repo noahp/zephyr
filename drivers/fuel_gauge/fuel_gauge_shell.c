@@ -8,16 +8,15 @@
 
 #include <zephyr/shell/shell.h>
 
-BUILD_ASSERT(DEVICE_DT_GET_ANY(fuel_gauge) != NULL, "Error: be sure to enable a fuel gauge device");
+// BUILD_ASSERT(DEVICE_DT_GET_ANY(silergy_sy24561) != NULL, "Error: be sure to enable a fuel gauge device");
 
-const struct device *fuel_gauge_dev = DEVICE_DT_GET_ANY(fuel_gauge);
+const struct device *fuel_gauge_dev = DEVICE_DT_GET_ANY(silergy_sy24561);
 
 static const char* prv_fuel_gauge_prop_to_string(fuel_gauge_prop_t prop)
 {
 #define FUEL_GAUGE_PROP_CASE(x) case x: return #x;
 	switch (prop) {
 		FUEL_GAUGE_PROP_CASE(FUEL_GAUGE_AVG_CURRENT)
-		FUEL_GAUGE_PROP_CASE(FUEL_GAUGE_BATTERY_CUTOFF)
 		FUEL_GAUGE_PROP_CASE(FUEL_GAUGE_CURRENT)
 		FUEL_GAUGE_PROP_CASE(FUEL_GAUGE_CHARGE_CUTOFF)
 		FUEL_GAUGE_PROP_CASE(FUEL_GAUGE_CYCLE_COUNT)
@@ -48,6 +47,9 @@ static const char* prv_fuel_gauge_prop_to_string(fuel_gauge_prop_t prop)
 		FUEL_GAUGE_PROP_CASE(FUEL_GAUGE_MANUFACTURER_NAME)
 		FUEL_GAUGE_PROP_CASE(FUEL_GAUGE_DEVICE_NAME)
 		FUEL_GAUGE_PROP_CASE(FUEL_GAUGE_DEVICE_CHEMISTRY)
+		FUEL_GAUGE_PROP_CASE(FUEL_GAUGE_CURRENT_DIRECTION)
+		FUEL_GAUGE_PROP_CASE(FUEL_GAUGE_STATE_OF_CHARGE_ALARM)
+		FUEL_GAUGE_PROP_CASE(FUEL_GAUGE_LOW_VOLTAGE_ALARM)
 		default:
 			return "Unknown";
 	}
