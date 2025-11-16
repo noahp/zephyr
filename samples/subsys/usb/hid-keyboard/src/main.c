@@ -15,9 +15,146 @@
 #include <zephyr/usb/class/usbd_hid.h>
 
 #include <zephyr/logging/log.h>
+#include <string.h>
 LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
-static const uint8_t hid_report_desc[] = HID_KEYBOARD_REPORT_DESC();
+/* MDS Protocol Report IDs */
+#define MDS_REPORT_ID_SUPPORTED_FEATURES  1
+#define MDS_REPORT_ID_DEVICE_IDENTIFIER   2
+#define MDS_REPORT_ID_DATA_URI           3
+#define MDS_REPORT_ID_AUTHORIZATION      4
+#define MDS_REPORT_ID_STREAM_CONTROL     5
+#define MDS_REPORT_ID_STREAM_DATA        96
+
+/* MDS Protocol Constants */
+#define MDS_STREAM_MODE_DISABLED         0
+#define MDS_STREAM_MODE_ENABLED          1
+
+/* Mock MDS data for testing */
+static const uint32_t mds_supported_features = 0x0000001F; /* All features supported */
+static const char mds_device_id[] = "nrf52840dk-test-device-001";
+static const char mds_data_uri[] = "https://chunks.memfault.com/api/v0/chunks/device-id";
+static const char mds_auth_token[] = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.test.token";
+static bool mds_streaming_enabled = false;
+
+static const uint8_t hid_report_desc[] = {
+	// Standard keyboard report (no report ID)
+	HID_USAGE_PAGE(HID_USAGE_GEN_DESKTOP),
+	HID_USAGE(HID_USAGE_GEN_DESKTOP_KEYBOARD),
+	HID_COLLECTION(HID_COLLECTION_APPLICATION),
+		HID_USAGE_PAGE(HID_USAGE_GEN_DESKTOP_KEYPAD),
+		/* HID_USAGE_MINIMUM(Keyboard LeftControl) */
+		HID_USAGE_MIN8(0xE0),
+		/* HID_USAGE_MAXIMUM(Keyboard Right GUI) */
+		HID_USAGE_MAX8(0xE7),
+		HID_LOGICAL_MIN8(0),
+		HID_LOGICAL_MAX8(1),
+		HID_REPORT_SIZE(1),
+		HID_REPORT_COUNT(8),
+		/* HID_INPUT(Data,Var,Abs) */
+		HID_INPUT(0x02),
+		HID_REPORT_SIZE(8),
+		HID_REPORT_COUNT(1),
+		/* HID_INPUT(Cnst,Var,Abs) */
+		HID_INPUT(0x03),
+		HID_REPORT_SIZE(1),
+		HID_REPORT_COUNT(5),
+		HID_USAGE_PAGE(HID_USAGE_GEN_LEDS),
+		/* HID_USAGE_MINIMUM(Num Lock) */
+		HID_USAGE_MIN8(1),
+		/* HID_USAGE_MAXIMUM(Kana) */
+		HID_USAGE_MAX8(5),
+		/* HID_OUTPUT(Data,Var,Abs) */
+		HID_OUTPUT(0x02),
+		HID_REPORT_SIZE(3),
+		HID_REPORT_COUNT(1),
+		/* HID_OUTPUT(Cnst,Var,Abs) */
+		HID_OUTPUT(0x03),
+		HID_REPORT_SIZE(8),
+		HID_REPORT_COUNT(6),
+		HID_LOGICAL_MIN8(0),
+		HID_LOGICAL_MAX8(101),
+		HID_USAGE_PAGE(HID_USAGE_GEN_DESKTOP_KEYPAD),
+		/* HID_USAGE_MIN8(Reserved) */
+		HID_USAGE_MIN8(0),
+		/* HID_USAGE_MAX8(Keyboard Application) */
+		HID_USAGE_MAX8(101),
+		/* HID_INPUT (Data,Ary,Abs) */
+		HID_INPUT(0x00),
+	HID_END_COLLECTION,
+
+	// Custom vendor-defined report with Report ID 96 (Stream Data)
+	// Usage Page: Vendor-defined (0xFF00)
+	0x06, 0x00, 0xFF,  // Usage Page (Vendor Defined 0xFF00)
+	0x09, 0x01,        // Usage (0x01)
+	0xA1, 0x01,        // Collection (Application)
+	0x85, 96,          //   Report ID (96) - Stream Data
+	0x09, 0x02,        //   Usage (0x02)
+	0x15, 0x00,        //   Logical Minimum (0)
+	0x26, 0xFF, 0x00,  //   Logical Maximum (255)
+	0x75, 0x08,        //   Report Size (8)
+	0x95, 0x3F,        //   Report Count (63) - 63 bytes for OUT report
+	0x91, 0x02,        //   Output (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position,Non-volatile)
+	0x09, 0x03,        //   Usage (0x03)
+	0x15, 0x00,        //   Logical Minimum (0)
+	0x26, 0xFF, 0x00,  //   Logical Maximum (255)
+	0x75, 0x08,        //   Report Size (8)
+	0x95, 0x3F,        //   Report Count (63) - 63 bytes for IN report
+	0x81, 0x02,        //   Input (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
+	0xC0,              // End Collection
+
+	// MDS Feature Reports Collection
+	0x06, 0x00, 0xFF,  // Usage Page (Vendor Defined 0xFF00)
+	0x09, 0x10,        // Usage (0x10) - MDS
+	0xA1, 0x01,        // Collection (Application)
+
+	// Report ID 1: Supported Features (4 bytes)
+	0x85, 0x01,        //   Report ID (1)
+	0x09, 0x11,        //   Usage (0x11)
+	0x15, 0x00,        //   Logical Minimum (0)
+	0x26, 0xFF, 0x00,  //   Logical Maximum (255)
+	0x75, 0x08,        //   Report Size (8)
+	0x95, 0x04,        //   Report Count (4) - 32-bit features
+	0xB1, 0x02,        //   Feature (Data,Var,Abs)
+
+	// Report ID 2: Device Identifier (64 bytes max)
+	0x85, 0x02,        //   Report ID (2)
+	0x09, 0x12,        //   Usage (0x12)
+	0x15, 0x00,        //   Logical Minimum (0)
+	0x26, 0xFF, 0x00,  //   Logical Maximum (255)
+	0x75, 0x08,        //   Report Size (8)
+	0x95, 0x40,        //   Report Count (64)
+	0xB1, 0x02,        //   Feature (Data,Var,Abs)
+
+	// Report ID 3: Data URI (128 bytes max)
+	0x85, 0x03,        //   Report ID (3)
+	0x09, 0x13,        //   Usage (0x13)
+	0x15, 0x00,        //   Logical Minimum (0)
+	0x26, 0xFF, 0x00,  //   Logical Maximum (255)
+	0x75, 0x08,        //   Report Size (8)
+	0x95, 0x80,        //   Report Count (128)
+	0xB1, 0x02,        //   Feature (Data,Var,Abs)
+
+	// Report ID 4: Authorization (128 bytes max)
+	0x85, 0x04,        //   Report ID (4)
+	0x09, 0x14,        //   Usage (0x14)
+	0x15, 0x00,        //   Logical Minimum (0)
+	0x26, 0xFF, 0x00,  //   Logical Maximum (255)
+	0x75, 0x08,        //   Report Size (8)
+	0x95, 0x80,        //   Report Count (128)
+	0xB1, 0x02,        //   Feature (Data,Var,Abs)
+
+	// Report ID 5: Stream Control (1 byte)
+	0x85, 0x05,        //   Report ID (5)
+	0x09, 0x15,        //   Usage (0x15)
+	0x15, 0x00,        //   Logical Minimum (0)
+	0x25, 0x01,        //   Logical Maximum (1)
+	0x75, 0x08,        //   Report Size (8)
+	0x95, 0x01,        //   Report Count (1)
+	0xB1, 0x02,        //   Feature (Data,Var,Abs)
+
+	0xC0,              // End Collection
+};
 
 enum kb_leds_idx {
 	KB_LED_NUMLOCK = 0,
@@ -81,20 +218,101 @@ static int kb_get_report(const struct device *dev,
 			 const uint8_t type, const uint8_t id, const uint16_t len,
 			 uint8_t *const buf)
 {
-	LOG_WRN("Get Report not implemented, Type %u ID %u", type, id);
+	if (type == HID_REPORT_TYPE_FEATURE) {
+		LOG_INF("Get Feature Report: ID %u, len %u", id, len);
+		buf[0] = id; /* First byte is report ID */
+		uint8_t *payload_buf = &buf[1];
+		uint16_t payload_len = len - 1;
 
-	return 0;
+		switch (id) {
+		case MDS_REPORT_ID_SUPPORTED_FEATURES:
+			if (payload_len >= 4) {
+				/* Return supported features as little-endian 32-bit */
+				payload_buf[0] = (mds_supported_features >> 0) & 0xFF;
+				payload_buf[1] = (mds_supported_features >> 8) & 0xFF;
+				payload_buf[2] = (mds_supported_features >> 16) & 0xFF;
+				payload_buf[3] = (mds_supported_features >> 24) & 0xFF;
+				LOG_INF("Returning supported features: 0x%08X", mds_supported_features);
+				return 4;
+			}
+			break;
+
+		case MDS_REPORT_ID_DEVICE_IDENTIFIER:
+			if (payload_len >= sizeof(mds_device_id)) {
+				memcpy(payload_buf, mds_device_id, sizeof(mds_device_id));
+				LOG_INF("Returning device ID: %s", mds_device_id);
+				return sizeof(mds_device_id);
+			}
+			break;
+
+		case MDS_REPORT_ID_DATA_URI:
+			if (payload_len >= sizeof(mds_data_uri)) {
+				memcpy(payload_buf, mds_data_uri, sizeof(mds_data_uri));
+				LOG_INF("Returning data URI: %s", mds_data_uri);
+				return sizeof(mds_data_uri);
+			}
+			break;
+
+		case MDS_REPORT_ID_AUTHORIZATION:
+			if (payload_len >= sizeof(mds_auth_token)) {
+				memcpy(payload_buf, mds_auth_token, sizeof(mds_auth_token));
+				LOG_INF("Returning auth token (length: %zu)", sizeof(mds_auth_token));
+				return sizeof(mds_auth_token);
+			}
+			break;
+
+		case MDS_REPORT_ID_STREAM_CONTROL:
+			if (payload_len >= 1) {
+				payload_buf[0] = mds_streaming_enabled ? MDS_STREAM_MODE_ENABLED : MDS_STREAM_MODE_DISABLED;
+				LOG_INF("Returning stream control: %u", payload_buf[0]);
+				return 1;
+			}
+			break;
+
+		default:
+			LOG_WRN("Unsupported feature report ID: %u", id);
+			return -ENOTSUP;
+		}
+
+		LOG_ERR("Buffer too small for feature report ID %u (need %u, got %u)", id, len, len);
+		return -EINVAL;
+	}
+
+	LOG_WRN("Get Report not implemented for type %u, ID %u", type, id);
+	return -ENOTSUP;
 }
 
 static int kb_set_report(const struct device *dev,
 			 const uint8_t type, const uint8_t id, const uint16_t len,
 			 const uint8_t *const buf)
 {
+	if (type == HID_REPORT_TYPE_FEATURE) {
+		LOG_INF("Set Feature Report: ID %u, len %u", id, len);
+		LOG_HEXDUMP_INF(buf, len, "Feature data:");
+
+		switch (id) {
+		case MDS_REPORT_ID_STREAM_CONTROL:
+			if (len >= 1) {
+				bool enable = (buf[1] == MDS_STREAM_MODE_ENABLED);
+				mds_streaming_enabled = enable;
+				LOG_INF("Stream control: %s", enable ? "ENABLED" : "DISABLED");
+				return 0;
+			}
+			LOG_ERR("Stream control report too short: %u bytes", len);
+			return -EINVAL;
+
+		default:
+			LOG_WRN("Unsupported feature report ID for set: %u", id);
+			return -ENOTSUP;
+		}
+	}
+
 	if (type != HID_REPORT_TYPE_OUTPUT) {
-		LOG_WRN("Unsupported report type");
+		LOG_WRN("Unsupported report type for set: %u", type);
 		return -ENOTSUP;
 	}
 
+	/* Handle keyboard LED output reports */
 	for (unsigned int i = 0; i < ARRAY_SIZE(kb_leds); i++) {
 		if (kb_leds[i].port == NULL) {
 			continue;
@@ -130,7 +348,45 @@ static void kb_output_report(const struct device *dev, const uint16_t len,
 			     const uint8_t *const buf)
 {
 	LOG_HEXDUMP_DBG(buf, len, "o.r.");
-	kb_set_report(dev, HID_REPORT_TYPE_OUTPUT, 0U, len, buf);
+
+	// Check if this is a report with report ID
+	if (len > 0) {
+		uint8_t report_id = buf[0];
+
+		switch (report_id) {
+		case MDS_REPORT_ID_STREAM_DATA:
+			/* MDS Stream Data Report */
+			LOG_INF("Received MDS stream data report, len=%u", len);
+			if (len > 1) {
+				/* First byte after report ID is sequence number */
+				uint8_t sequence = buf[1];
+				LOG_INF("Stream packet sequence: %u", sequence);
+				LOG_HEXDUMP_INF(&buf[2], len-2, "Stream payload:");
+
+				/* Here you could process the stream data according to MDS protocol */
+				if (mds_streaming_enabled) {
+					LOG_INF("Processing stream data (streaming enabled)");
+				} else {
+					LOG_WRN("Received stream data but streaming is disabled");
+				}
+			}
+			return;
+
+		case 0:
+			/* Standard keyboard LED output report (no report ID) */
+			LOG_DBG("Keyboard LED report");
+			break;
+
+		default:
+			LOG_INF("Received unknown output report ID: %u", report_id);
+			return;
+		}
+	}
+
+	// Handle as standard keyboard LED output report (no report ID)
+	if (buf[0] == 0) {
+		kb_set_report(dev, HID_REPORT_TYPE_OUTPUT, 0U, len, buf);
+	}
 }
 
 struct hid_device_ops kb_ops = {
