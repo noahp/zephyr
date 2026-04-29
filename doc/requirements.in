@@ -33,3 +33,6 @@ coverxygen!=1.8.2 # See https://github.com/psycofdj/coverxygen/issues/37
 
 # Used by Kconfig extension
 python-dotenv
+
+# Used by scripts/docs/rst2md.py to convert RST docs to Markdown
+markdownify

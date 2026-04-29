@@ -16,13 +16,16 @@ DOXYGEN_FORCE_SINGLE_THREAD ?= 0
 # ------------------------------------------------------------------------------
 # Documentation targets
 
-.PHONY: configure clean html html-fast html-live html-live-fast latex pdf doxygen doxygen-coverage doxygen-coverage-json
+.PHONY: configure clean html html-fast html-live html-live-fast latex pdf markdown markdown-fast doxygen doxygen-coverage doxygen-coverage-json
 
 html-fast:
 	${MAKE} html DT_TURBO_MODE=1 HW_FEATURES_TURBO_MODE=1
 
 html-live-fast:
 	${MAKE} html-live DT_TURBO_MODE=1 HW_FEATURES_TURBO_MODE=1
+
+markdown markdown-fast:
+	python3 ${CURDIR}/../scripts/docs/rst2md.py ${CURDIR} -o ${BUILDDIR}/markdown
 
 doxygen-coverage doxygen-coverage-json:
 	${MAKE} configure DOXYGEN_FORCE_SINGLE_THREAD=1
