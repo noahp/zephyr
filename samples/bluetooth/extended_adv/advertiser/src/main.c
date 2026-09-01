@@ -14,6 +14,7 @@ static struct bt_conn *default_conn;
 enum bt_sample_adv_evt {
 	BT_SAMPLE_EVT_CONNECTED,
 	BT_SAMPLE_EVT_DISCONNECTED,
+	BT_SAMPLE_EVT_ADV_TIMEOUT,
 	BT_SAMPLE_EVT_MAX,
 };
 
@@ -71,12 +72,32 @@ BT_CONN_CB_DEFINE(conn_cb) = {
 	.recycled = recycled_cb,
 };
 
+static void adv_terminated_cb(struct bt_le_ext_adv *adv,
+			       const struct bt_le_ext_adv_terminated_info *info)
+{
+	ARG_UNUSED(adv);
+
+	printk("Advertising set terminated, reason 0x%02X %s, num_completed_ext_adv_evts %u\n",
+	       info->reason, bt_hci_err_to_str(info->reason), info->num_completed_ext_adv_evts);
+
+	if (info->reason == BT_HCI_ERR_ADV_TIMEOUT && app_st == BT_SAMPLE_ST_ADV) {
+		raise_evt(BT_SAMPLE_EVT_ADV_TIMEOUT);
+	}
+}
+
+static const struct bt_le_ext_adv_cb adv_cb = {
+	.terminated = adv_terminated_cb,
+};
+
+/* Advertise for 3 seconds so an idle DK exercises the timeout path too. */
+#define ADV_TIMEOUT_10MS 300
+
 static int start_advertising(struct bt_le_ext_adv *adv)
 {
 	int err;
 
 	printk("Starting Extended Advertising\n");
-	err = bt_le_ext_adv_start(adv, BT_LE_EXT_ADV_START_DEFAULT);
+	err = bt_le_ext_adv_start(adv, BT_LE_EXT_ADV_START_PARAM(ADV_TIMEOUT_10MS, 0));
 	if (err) {
 		printk("Failed to start extended advertising (err %d)\n", err);
 	}
@@ -103,7 +124,7 @@ int main(void)
 	}
 
 	/* Create a connectable advertising set */
-	err = bt_le_ext_adv_create(BT_LE_EXT_ADV_CONN, NULL, &adv);
+	err = bt_le_ext_adv_create(BT_LE_EXT_ADV_CONN, &adv_cb, &adv);
 	if (err) {
 		printk("Failed to create advertising set (err %d)\n", err);
 		return err;
@@ -147,6 +168,14 @@ int main(void)
 
 			printk("Disconnected state! Restarting advertising\n");
 			app_st = BT_SAMPLE_ST_ADV;
+			err = start_advertising(adv);
+			if (err) {
+				return err;
+			}
+		} else if (atomic_test_and_clear_bit(evt_bitmask, BT_SAMPLE_EVT_ADV_TIMEOUT) &&
+			   app_st == BT_SAMPLE_ST_ADV) {
+
+			printk("Advertising timed out with no connection. Restarting advertising\n");
 			err = start_advertising(adv);
 			if (err) {
 				return err;
